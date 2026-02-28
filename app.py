@@ -1,143 +1,166 @@
 import streamlit as st
-from langchain_xai import ChatXAI
-from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
-from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import MemorySaver
 import os
 from uuid import uuid4
 import requests
 from bs4 import BeautifulSoup
 
-st.set_page_config(page_title="AetherAgent", page_icon="🌌", layout="wide")
-st.title("🌌 AetherAgent")
-st.markdown("**Production-Scale Agentic AI** • Powered by **xAI Grok** + LangGraph ReAct")
+from langchain_xai import ChatXAI
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
 
+# ───────────────────────────────────────────────
+# Page config & title
+# ───────────────────────────────────────────────
+st.set_page_config(
+    page_title="AetherAgent",
+    page_icon="🌌",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.title("🌌 AetherAgent")
+st.markdown(
+    "**Production-grade Agentic AI**  •  Powered by **xAI Grok** + **LangGraph ReAct**  •  "
+    "Tools: web search + calculator  •  Persistent memory"
+)
+
+# ───────────────────────────────────────────────
+# Sidebar – API key & model selection
+# ───────────────────────────────────────────────
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    xai_key = st.text_input("xAI API Key (console.x.ai)", type="password", value=st.secrets.get("XAI_API_KEY", ""))
-    model = st.selectbox("Grok Model", ["grok-4", "grok-beta"], index=0)
+    st.header("⚙️ Settings")
+    
+    # Prefer secret → fallback to text input
+    xai_key = st.secrets.get("XAI_API_KEY", None)
+    if not xai_key:
+        xai_key = st.text_input(
+            "xAI API Key",
+            type="password",
+            help="Get it at https://console.x.ai • Add to Secrets for permanent access"
+        )
+    
+    model_name = st.selectbox(
+        "Grok Model",
+        options=["grok-4", "grok-beta"],
+        index=0
+    )
+    
+    st.caption("💡 Pro tip: Use Secrets tab in Streamlit dashboard for auto-loading key")
 
 if not xai_key:
-    st.error("Add your xAI API key in Streamlit Cloud Dashboard → your app → Settings → Secrets as XAI_API_KEY → Restart")
+    st.error("Please provide your xAI API key above or in Streamlit Cloud Secrets → Restart app")
     st.stop()
 
 os.environ["XAI_API_KEY"] = xai_key
 
-# Calculator tool
+# ───────────────────────────────────────────────
+# Tools
+# ───────────────────────────────────────────────
+
 @tool
 def calculator(expression: str) -> str:
-    """Useful for math/calculations. Input: valid Python expression."""
+    """Execute simple math / Python expressions safely.
+    Input must be a valid expression, e.g. '2 * (3 + 4)' or 'import math; math.sqrt(16)'"""
     try:
-        return str(eval(expression, {"__builtins__": {}}))
-    except Exception as e:
-        return f"Error: {str(e)}"
-
-# Simple web search tool (no DuckDuckGo dependency)
-@tool
-def web_search(query: str) -> str:
-    """Search the web for current info/news. Input: search query string."""
-    try:
-        url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        response = requests.get(url, headers=headers, timeout=12)
-        soup = BeautifulSoup(response.text, "html.parser")
-        results = []
-        for g in soup.find_all('div', class_='g')[:4]:  # top 4 snippets
-            title = g.find('h3')
-            snippet = g.find('div', class_='VwiC3b') or g.find('span', class_='st')
-            if title and snippet:
-                results.append(f"**{title.text}**\n{snippet.text[:300]}...\n")
-        return "\n".join(results) if results else "No useful results found. Try rephrasing."
-    except Exception as e:
-        return f"Search failed: {str(e)}. Agent will reason without web info."
-
-tools = [web_search, calculator]
-
-# LLM + Agent setup
-llm = ChatXAI(model=model, temperature=0.7)
-memory = MemorySaver()
-agent_executor = create_react_agent(llm, tools, checkpointer=memory)
-
-# Session state
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "thread_id" not in st.session_state:
-    st.session_state.thread_id = str(uuid4())
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-if prompt := st.chat_input("Ask anything — e.g. latest CSK news, Bengaluru weather, calculate something..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Agent thinking & using tools..."):
-            config = {"configurable": {"thread_id": st.session_state.thread_id}}
-            response = agent_executor.invoke({"messages": [HumanMessage(content=prompt)]}, config=config)
-            final_answer = response["messages"][-1].content
-            st.markdown(final_answer)
-
-    st.session_state.messages.append({"role": "assistant", "content": final_answer})
-
-st.caption("✅ Agentic AI with memory & tools | Built for Bengaluru/CSK fan vibes 🏏🌆 | No DuckDuckGo issues!")        return str(eval(expression, {"__builtins__": {}}))
+        # Very restricted globals/locals
+        result = eval(expression, {"__builtins__": {}}, {})
+        return str(result)
     except Exception as e:
         return f"Calculation error: {str(e)}"
 
-search_tool = DuckDuckGoSearchRun()
-tools = [search_tool, calculator]
 
-# LLM + Agent (with memory)
-llm = ChatXAI(model=model, temperature=0.6)
+@tool
+def web_search(query: str) -> str:
+    """Basic web search using Google results scraping (no external API needed).
+    Returns top snippets for current information."""
+    try:
+        url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        results = []
+
+        for block in soup.select("div.g")[:4]:
+            title_tag = block.select_one("h3")
+            snippet_tag = block.select_one("div.VwiC3b, span.st")
+            if title_tag and snippet_tag:
+                title = title_tag.get_text(strip=True)
+                snippet = snippet_tag.get_text(strip=True)[:320]
+                results.append(f"**{title}**\n{snippet}…")
+
+        if not results:
+            return "No clear results found. Try a more specific query."
+
+        return "\n\n".join(results)
+
+    except Exception as e:
+        return f"Web search failed: {str(e)}. Continuing without fresh web data."
+
+
+tools = [web_search, calculator]
+
+# ───────────────────────────────────────────────
+# LLM + Agent
+# ───────────────────────────────────────────────
+llm = ChatXAI(model=model_name, temperature=0.65)
+
 memory = MemorySaver()
-agent_executor = create_react_agent(llm, tools, checkpointer=memory)
+agent = create_react_agent(
+    llm,
+    tools,
+    checkpointer=memory,
+    # Optional: you can add interrupt_before=["tools"] for human approval later
+)
 
-# Session state
+# ───────────────────────────────────────────────
+# Session management
+# ───────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = str(uuid4())
 
-# Display chat
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+# Show history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# Chat input
-if prompt := st.chat_input("What should the agent do? (e.g. Research latest AI news and calculate ROI on investing in it)"):
+# ───────────────────────────────────────────────
+# Chat input & agent execution
+# ───────────────────────────────────────────────
+if prompt := st.chat_input("Ask me anything (news, math, planning, cricket…)"):
+    
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Agent thinking & using tools..."):
+        with st.spinner("Thinking + using tools…"):
             config = {"configurable": {"thread_id": st.session_state.thread_id}}
-            response = agent_executor.invoke(
-                {"messages": [HumanMessage(content=prompt)]}, 
-                config=config
-            )
-            final_answer = response["messages"][-1].content
-            st.markdown(final_answer)
-    
-    st.session_state.messages.append({"role": "assistant", "content": final_answer})
+            
+            try:
+                response = agent.invoke(
+                    {"messages": [HumanMessage(content=prompt)]},
+                    config=config
+                )
+                answer = response["messages"][-1].content
+                st.markdown(answer)
+            except Exception as e:
+                st.error(f"Agent error: {str(e)}")
+                answer = f"⚠️ Something went wrong: {str(e)}"
 
-# Quick examples
-st.subheader("Try these")
-cols = st.columns(3)
-with cols[0]:
-    if st.button("📈 Research & calculate Tesla stock impact"):
-        st.session_state.messages.append({"role": "user", "content": "Research latest Tesla news and calculate potential 10% portfolio impact"})
-        st.rerun()
-with cols[1]:
-    if st.button("🌍 Plan a 3-day trip to Bengaluru"):
-        st.session_state.messages.append({"role": "user", "content": "Plan a perfect 3-day budget trip to Bengaluru including weather, food & attractions"})
-        st.rerun()
-with cols[2]:
-    if st.button("🔬 Explain quantum computing simply"):
-        st.session_state.messages.append({"role": "user", "content": "Explain quantum computing to a 12-year-old and calculate 2^10"})
-        st.rerun()
+    st.session_state.messages.append({"role": "assistant", "content": answer})
 
-st.caption("✅ Fully agentic (plans → tools → observes → answers) | Memory enabled | Ready for production")
+# Footer
+st.divider()
+st.caption(
+    "AetherAgent v1 • Built for real-time reasoning • "
+    "CSK & Bengaluru vibes 🏏🌆 • Memory preserved across chats"
+        )
