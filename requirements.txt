@@ -4,3 +4,4 @@ langchain-xai
 langgraph
 langchain-community
 python-dotenv
+duckduckgo-search
